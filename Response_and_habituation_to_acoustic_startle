@@ -1,0 +1,178 @@
+# Title: Response and habituation to Acoustic Startle in zebrafish larvae analysis"
+# Author: Adele Leggieri
+
+# To analyse the response and habituation to acousti startlem, we need the following libraries:
+library(plyr)
+library(ggplot2)
+library(Hmisc)
+library(lme4)
+library(car)
+library(betareg)
+library(emmeans)
+library(readxl)
+
+# Upload the data
+data = read_excel(file.choose())
+
+# Create "time" and "fish ID" columns
+# The number on the left (x) in seq(x,y) is the interval on the repetition you want in your time columns, in our case we want every second, so it'll be 1.
+# The number on the right (y), is the duration of the experiments expressed in the measure unit (238 seconds in this case).
+# Length.out = number of the rows of your data file, aka the number of observations in global environment (top right corner, 83062 in this case).
+data$time <- rep(seq(1,238),length.out=83062)
+data$fish.ID <- paste(data$trial, data$well, sep=" ")
+
+# Change the structure of the data
+str(data)
+data$fish.ID= as.factor(data$fish.ID)
+data$genotype = as.factor(data$genotype)
+data$mean.dist.mm = as.numeric(data$mean.dist.mm)
+data$drug = as.factor(data$drug)
+
+# Plot the data
+# To plot the data, few seconds before the taps plus the taps, otherwise the graph will be crowded. In the example below I know that my taps start after second 180
+taponly <- subset (data, time > 175)
+Genotypes <- list('WT'= "WT",'HET'= "HET",'HOM'= "HOM")
+genotypes_labeller <- function(variable,value){return(Genotypes[value])}
+taponly$Genotype_f = factor(taponly$genotype, levels=c('WT','HET','HOM'))
+ggplot (taponly, #name of the dataset
+        aes(x=time, #variable on the x axis
+            y=mean.dist.mm, #variable on the y axis
+            group=drug, #if you don't have the drug, this will be genotype
+            colour=drug)) + #if you don't have the drug, this will be genotype
+  stat_summary(fun="mean", geom="line", size = 1.0) + 
+  stat_summary(fun.data = "mean_cl_normal", 
+               fun.args = list(mult = 1)) + 
+  xlab("Time (sec)") + ylab("Distance travelled (mm)") + #titles of your x and y axis
+  ggtitle("DISTANCE TRAVELLED DURING TAPS") + #title displayed on top of your plot
+  theme(text = element_text(size=15), 
+        panel.background = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_rect(colour = "grey", fill=NA, size=0.5),
+        axis.line = element_line(colour = "grey")) +
+  theme(axis.title.y = element_text(face = "bold"),
+        axis.title.x = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 55, size = 10, vjust=1, hjust=1)) +
+  #scale_color_manual(values = c("grey", "black"))+ #run this line by removing the "#" if you want to have specific colours
+  facet_grid( ~ Genotype_f, labeller = genotypes_labeller)
+
+# Analysis of the locomotion during the baseline
+baseline <- subset(data, time < X)
+baseline.lmer <- lmer(mean.dist.mm ~ genotype * as.factor(time) + (1|Individual.ID), data=baseline)
+Anova(baseline.lmer, test="Chisq")
+
+# If we see significance in the ANOVA, we run the posthoc test to see where are the differences:
+emmeans(baseline.lmer, pairwise ~ genotype, adjust="tukey")
+
+# Analysis of the locomotion during the taps/acoustic stimuli
+# Subset the exact seconds when the taps happen (in the example below from sec 661 to sec 679):
+tap1 <- subset(data, Time== 661)
+tap2 <- subset(data, Time== 663)
+tap3 <- subset(data, Time== 665)
+tap4 <- subset(data, Time== 667)
+tap5 <- subset(data, Time== 669)
+tap6 <- subset(data, Time== 671)
+tap7 <- subset(data, Time== 673)
+tap8 <- subset(data, Time== 675)
+tap9 <- subset(data, Time== 677)
+tap10 <- subset(data, Time==679)
+taps <-rbind(tap1,tap2. tap3, tap4, tap5, tap6, tap7, tap8, tap9, tap10)
+tap.lmer <- lmer(mean.dist.mm ~ genotype * as.factor(time) + (1|Individual.ID), data=taps)
+Anova(tap.lmer, test="Chisq")
+emmeans(tap.lmer, pairwise ~ genotype , adjust="tukey")
+
+# Analysis of the proportion of responders
+#In the line below: the second of the 1st tap (661 in this example), the second of the last tap (679 in this example), and the interval between the taps, 2sec in this case:
+taptimes<-seq(661, 679, by=2)
+
+# In the line below we write the number of the taps (from 1 to 10). By 1 means that R has to count from 1 to 1: 1, 2, 3 etc...
+stimulus<-seq(1,10,by=1)
+
+# Create the list with your genotypes:
+Genot<-list("WT","HET","HOM")
+
+# Create the dataset with the proportion of responders (PoR):
+dataPoR<-data.frame(matrix(ncol = 3, nrow = 0))
+cN<-c("Stimulus.number", "proportion.of.responders","Genotype")
+colnames(dataPoR) <- cN
+
+# Create the function to calculate the PoR
+for (g in Genot)
+ {
+    tmp.loop <- subset(data, genotype == g) #data is the name of your database
+    basal.loop <- subset(tmp.loop, Time==660) #change 660 with sec before the first tap
+    basal.loopmean <- mean(basal.loop[["mean.dist.mm"]], na.rm = TRUE)
+    basal.loopSD <- sd(basal.loop[["mean.dist.mm"]], na.rm = TRUE)
+    Threshold.loop<- basal.loopmean + 2*(basal.loopSD)
+    tmp<- rep(NA,length.out=10)
+    IDX=1
+    for (x in taptimes){
+      tmp[IDX] <- sum(tmp.loop$Mean_distance > Threshold.loop & tmp.loop$Time == x)/
+        sum(tmp.loop$Time == x)
+      IDX=IDX+1
+    }
+    print(tmp)
+    AA=data.frame(stimulus,tmp, rep(g,length.out=10))
+    dataPoR<-rbind(dataPoR,AA)
+  }
+
+
+# Check the sructure of your data and change the below titles of columns:
+str(dataPoR)
+names(dataPoR)[names(dataPoR) == "stimulus"] <- "Stimulus.number"
+names(dataPoR)[names(dataPoR) == "tmp"] <- "Proportion.of.responders"
+names(dataPoR)[names(dataPoR) == "rep.g..length.out...10."] <- "Genotype"
+dataPoR$Genotype<- as.factor(dataPoR$Genotype)
+dataPoR$Stimulus.number<- as.factor (dataPoR$Stimulus.number)
+
+# This type of analysis using proportional data that we are about to do is highly vulnerable to 0 and 1 values, therefore we need to check if any of the proportions are 0 or 1 (meaning 0% or 100%)
+summary(dataPoR$Proportion.of.responders)
+
+# If our min is = 0 and/or our Max = 1 so, we can substitute 1 with 0.9999 and 0 with 0.0001:
+dataPoR$Proportion.of.responders[dataPoR$Proportion.of.responders == 0.000000] <- 0.000001
+dataPoR$Proportion.of.responders[dataPoR$Proportion.of.responders == 1.0000] <- 0.9999
+
+
+proportion.of.responders = betareg(Proportion.of.responders ~ Genotype + Stimulus.number, data = dataPoR)
+Anova(proportion.of.responders)
+emmeans(proportion.of.responders, pairwise ~ Genotype , adjust="tukey")
+
+
+prop.of.responders <- ggplot (dataPoR, 
+                    aes(x=Stimulus.number, 
+                        y=Proportion.of.responders*100, 
+                        group=Genotype, 
+                        colour=Genotype)) + 
+  stat_summary(geom="point", size = 1) +
+  geom_smooth(method=lm,formula= (y ~ log(x)), se=FALSE)+
+  xlab("Stimulus number") + ylab("Proportion of responders") + 
+  ggtitle("")  +
+  theme(text = element_text(size=15), 
+        panel.background = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.border = element_rect(colour = "grey", fill=NA, size=0.5),
+        axis.line = element_line(colour = "grey")) +
+  theme(axis.title.y = element_text(face = "bold"),
+        axis.title.x = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 55, size = 12, vjust=1, hjust=1))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
